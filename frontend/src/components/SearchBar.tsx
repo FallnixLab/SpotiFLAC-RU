@@ -1,0 +1,817 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { InputWithContext } from "@/components/ui/input-with-context";
+import { CloudDownload, XCircle, Link, Search, X, ChevronDown, ArrowUpDown, } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
+import { FetchHistory } from "@/components/FetchHistory";
+import type { HistoryItem } from "@/components/FetchHistory";
+import { SearchSpotify, SearchSpotifyByType } from "../../wailsjs/go/main/App";
+import { backend } from "../../wailsjs/go/models";
+import { cn } from "@/lib/utils";
+import { useTypingEffect } from "@/hooks/useTypingEffect";
+import { getSettings, type Settings } from "@/lib/settings";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
+const FETCH_PLACEHOLDERS = [
+    "https://open.spotify.com/track/...",
+    "https://open.spotify.com/album/...",
+    "https://open.spotify.com/playlist/...",
+    "https://open.spotify.com/artist/...",
+];
+const SEARCH_PLACEHOLDERS = [
+    "Golden",
+    "Taylor Swift",
+    "The Weeknd",
+    "Starboy",
+    "Joji",
+    "Die For You",
+];
+const REGIONS = [
+    "AD",
+    "AE",
+    "AG",
+    "AL",
+    "AM",
+    "AO",
+    "AR",
+    "AT",
+    "AU",
+    "AZ",
+    "BA",
+    "BB",
+    "BD",
+    "BE",
+    "BF",
+    "BG",
+    "BH",
+    "BI",
+    "BJ",
+    "BN",
+    "BO",
+    "BR",
+    "BS",
+    "BT",
+    "BW",
+    "BZ",
+    "CA",
+    "CD",
+    "CG",
+    "CH",
+    "CI",
+    "CL",
+    "CM",
+    "CO",
+    "CR",
+    "CV",
+    "CW",
+    "CY",
+    "CZ",
+    "DE",
+    "DJ",
+    "DK",
+    "DM",
+    "DO",
+    "DZ",
+    "EC",
+    "EE",
+    "EG",
+    "ES",
+    "ET",
+    "FI",
+    "FJ",
+    "FM",
+    "FR",
+    "GA",
+    "GB",
+    "GD",
+    "GE",
+    "GH",
+    "GM",
+    "GN",
+    "GQ",
+    "GR",
+    "GT",
+    "GW",
+    "GY",
+    "HK",
+    "HN",
+    "HR",
+    "HT",
+    "HU",
+    "ID",
+    "IE",
+    "IL",
+    "IN",
+    "IQ",
+    "IS",
+    "IT",
+    "JM",
+    "JO",
+    "JP",
+    "KE",
+    "KG",
+    "KH",
+    "KI",
+    "KM",
+    "KN",
+    "KR",
+    "KW",
+    "KZ",
+    "LA",
+    "LB",
+    "LC",
+    "LI",
+    "LK",
+    "LR",
+    "LS",
+    "LT",
+    "LU",
+    "LV",
+    "LY",
+    "MA",
+    "MC",
+    "MD",
+    "ME",
+    "MG",
+    "MH",
+    "MK",
+    "ML",
+    "MN",
+    "MO",
+    "MR",
+    "MT",
+    "MU",
+    "MV",
+    "MW",
+    "MX",
+    "MY",
+    "MZ",
+    "NA",
+    "NE",
+    "NG",
+    "NI",
+    "NL",
+    "NO",
+    "NP",
+    "NR",
+    "NZ",
+    "OM",
+    "PA",
+    "PE",
+    "PG",
+    "PH",
+    "PK",
+    "PL",
+    "PS",
+    "PT",
+    "PW",
+    "PY",
+    "QA",
+    "RO",
+    "RS",
+    "RW",
+    "SA",
+    "SB",
+    "SC",
+    "SE",
+    "SG",
+    "SI",
+    "SK",
+    "SL",
+    "SM",
+    "SN",
+    "SR",
+    "ST",
+    "SV",
+    "SZ",
+    "TD",
+    "TG",
+    "TH",
+    "TJ",
+    "TL",
+    "TN",
+    "TO",
+    "TR",
+    "TT",
+    "TV",
+    "TW",
+    "TZ",
+    "UA",
+    "UG",
+    "US",
+    "UY",
+    "UZ",
+    "VC",
+    "VE",
+    "VN",
+    "VU",
+    "WS",
+    "XK",
+    "ZA",
+    "ZM",
+    "ZW",
+];
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+const getRegionName = (code: string) => {
+    try {
+        if (code === "XK")
+            return "Kosovo";
+        return regionNames.of(code) || code;
+    }
+    catch (e) {
+        return code;
+    }
+};
+type ResultTab = "tracks" | "albums" | "artists" | "playlists";
+const RECENT_SEARCHES_KEY = "spotiflac_recent_searches";
+const MAX_RECENT_SEARCHES = 8;
+const SEARCH_LIMIT = 50;
+interface SearchBarProps {
+    url: string;
+    loading: boolean;
+    onUrlChange: (url: string) => void;
+    onFetch: () => void;
+    onFetchUrl: (url: string) => Promise<void>;
+    history: HistoryItem[];
+    onHistorySelect: (item: HistoryItem) => void;
+    onHistoryRemove: (id: string) => void;
+    hasResult: boolean;
+    searchMode: boolean;
+    onSearchModeChange: (isSearch: boolean) => void;
+    region: string;
+    onRegionChange: (region: string) => void;
+}
+export function SearchBar({ url, loading, onUrlChange, onFetch, onFetchUrl, history, onHistorySelect, onHistoryRemove, hasResult, searchMode, onSearchModeChange, region, onRegionChange, }: SearchBarProps) {
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<backend.SearchResponse | null>(null);
+    const [showRegionSelector, setShowRegionSelector] = useState(() => getSettings().linkResolver === "songlink");
+    const [resultFilter, setResultFilter] = useState("");
+    const [sortOrders, setSortOrders] = useState<Record<ResultTab, string>>({
+        tracks: "default",
+        albums: "default",
+        artists: "default",
+        playlists: "default",
+    });
+    const [isSearching, setIsSearching] = useState(false);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [lastSearchedQuery, setLastSearchedQuery] = useState("");
+    const [activeTab, setActiveTab] = useState<ResultTab>("tracks");
+    const [recentSearches, setRecentSearches] = useState<string[]>([]);
+    const [hasMore, setHasMore] = useState<Record<ResultTab, boolean>>({
+        tracks: false,
+        albums: false,
+        artists: false,
+        playlists: false,
+    });
+    const [showInvalidUrlDialog, setShowInvalidUrlDialog] = useState(false);
+    const [invalidUrl, setInvalidUrl] = useState("");
+    const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const placeholders = searchMode ? SEARCH_PLACEHOLDERS : FETCH_PLACEHOLDERS;
+    const placeholderText = useTypingEffect(placeholders);
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+            if (saved) {
+                setRecentSearches(JSON.parse(saved));
+            }
+        }
+        catch (error) {
+            console.error("Failed to load recent searches:", error);
+        }
+    }, []);
+    useEffect(() => {
+        const syncRegionVisibility = (settings?: Partial<Settings>) => {
+            const resolver = settings?.linkResolver ?? getSettings().linkResolver;
+            setShowRegionSelector(resolver === "songlink");
+        };
+        syncRegionVisibility();
+        const handleSettingsUpdate = (event: Event) => {
+            syncRegionVisibility((event as CustomEvent<Partial<Settings>>).detail);
+        };
+        window.addEventListener("settingsUpdated", handleSettingsUpdate);
+        return () => window.removeEventListener("settingsUpdated", handleSettingsUpdate);
+    }, []);
+    const saveRecentSearch = (query: string) => {
+        const trimmed = query.trim();
+        if (!trimmed)
+            return;
+        setRecentSearches((prev) => {
+            const filtered = prev.filter((s) => s.toLowerCase() !== trimmed.toLowerCase());
+            const updated = [trimmed, ...filtered].slice(0, MAX_RECENT_SEARCHES);
+            try {
+                localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+            }
+            catch (error) {
+                console.error("Failed to save recent searches:", error);
+            }
+            return updated;
+        });
+    };
+    const removeRecentSearch = (query: string) => {
+        setRecentSearches((prev) => {
+            const updated = prev.filter((s) => s !== query);
+            try {
+                localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+            }
+            catch (error) {
+                console.error("Failed to save recent searches:", error);
+            }
+            return updated;
+        });
+    };
+    useEffect(() => {
+        if (!searchMode || !searchQuery.trim()) {
+            return;
+        }
+        if (searchQuery.trim() === lastSearchedQuery) {
+            return;
+        }
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+        searchTimeoutRef.current = setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const results = await SearchSpotify({
+                    query: searchQuery,
+                    limit: SEARCH_LIMIT,
+                });
+                setSearchResults(results);
+                setResultFilter("");
+                setLastSearchedQuery(searchQuery.trim());
+                saveRecentSearch(searchQuery.trim());
+                setHasMore({
+                    tracks: results.tracks.length === SEARCH_LIMIT,
+                    albums: results.albums.length === SEARCH_LIMIT,
+                    artists: results.artists.length === SEARCH_LIMIT,
+                    playlists: results.playlists.length === SEARCH_LIMIT,
+                });
+                if (results.tracks.length > 0)
+                    setActiveTab("tracks");
+                else if (results.albums.length > 0)
+                    setActiveTab("albums");
+                else if (results.artists.length > 0)
+                    setActiveTab("artists");
+                else if (results.playlists.length > 0)
+                    setActiveTab("playlists");
+            }
+            catch (error) {
+                console.error("Search failed:", error);
+                setSearchResults(null);
+            }
+            finally {
+                setIsSearching(false);
+            }
+        }, 400);
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
+    }, [searchQuery, searchMode, lastSearchedQuery]);
+    const handleLoadMore = async () => {
+        if (!searchResults || !lastSearchedQuery || isLoadingMore)
+            return;
+        const typeMap: Record<ResultTab, string> = {
+            tracks: "track",
+            albums: "album",
+            artists: "artist",
+            playlists: "playlist",
+        };
+        const currentCount = getTabCount(activeTab);
+        setIsLoadingMore(true);
+        try {
+            const moreResults = await SearchSpotifyByType({
+                query: lastSearchedQuery,
+                search_type: typeMap[activeTab],
+                limit: SEARCH_LIMIT,
+                offset: currentCount,
+            });
+            if (moreResults.length > 0) {
+                setSearchResults((prev) => {
+                    if (!prev)
+                        return prev;
+                    const updated = new backend.SearchResponse({
+                        tracks: activeTab === "tracks"
+                            ? [...prev.tracks, ...moreResults]
+                            : prev.tracks,
+                        albums: activeTab === "albums"
+                            ? [...prev.albums, ...moreResults]
+                            : prev.albums,
+                        artists: activeTab === "artists"
+                            ? [...prev.artists, ...moreResults]
+                            : prev.artists,
+                        playlists: activeTab === "playlists"
+                            ? [...prev.playlists, ...moreResults]
+                            : prev.playlists,
+                    });
+                    return updated;
+                });
+            }
+            setHasMore((prev) => ({
+                ...prev,
+                [activeTab]: moreResults.length === SEARCH_LIMIT,
+            }));
+        }
+        catch (error) {
+            console.error("Load more failed:", error);
+        }
+        finally {
+            setIsLoadingMore(false);
+        }
+    };
+    const isSpotifyUrl = (text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed)
+            return true;
+        const isUrl = /^(https?:\/\/|www\.)/i.test(trimmed) || /^spotify:/i.test(trimmed);
+        if (!isUrl)
+            return true;
+        return (trimmed.includes("spotify.com") ||
+            trimmed.includes("spotify.link") ||
+            trimmed.startsWith("spotify:"));
+    };
+    const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+        if (searchMode)
+            return;
+        const pastedText = e.clipboardData.getData("text");
+        if (pastedText && !isSpotifyUrl(pastedText)) {
+            e.preventDefault();
+            setInvalidUrl(pastedText);
+            setShowInvalidUrlDialog(true);
+        }
+    };
+    const handleFetchWithValidation = () => {
+        if (!isSpotifyUrl(url)) {
+            setInvalidUrl(url);
+            setShowInvalidUrlDialog(true);
+            return;
+        }
+        onFetch();
+    };
+    const handleResultClick = (externalUrl: string) => {
+        onSearchModeChange(false);
+        onFetchUrl(externalUrl);
+    };
+    const formatDuration = (ms: number) => {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000);
+        return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    };
+    const hasAnyResults = searchResults &&
+        (searchResults.tracks.length > 0 ||
+            searchResults.albums.length > 0 ||
+            searchResults.artists.length > 0 ||
+            searchResults.playlists.length > 0);
+    const getTabCount = (tab: ResultTab): number => {
+        if (!searchResults)
+            return 0;
+        switch (tab) {
+            case "tracks":
+                return searchResults.tracks.length;
+            case "albums":
+                return searchResults.albums.length;
+            case "artists":
+                return searchResults.artists.length;
+            case "playlists":
+                return searchResults.playlists.length;
+        }
+    };
+    const sortedResults = useMemo(() => {
+        if (!searchResults)
+            return { tracks: [], albums: [], artists: [], playlists: [] };
+        const filterStr = resultFilter.toLowerCase();
+        let tracks = [...searchResults.tracks];
+        if (filterStr) {
+            tracks = tracks.filter(t => (t.name || '').toLowerCase().includes(filterStr) || (t.artists || '').toLowerCase().includes(filterStr));
+        }
+        const tSort = sortOrders.tracks;
+        if (tSort !== 'default') {
+            tracks.sort((a, b) => {
+                if (tSort === 'title-asc')
+                    return (a.name || '').localeCompare(b.name || '');
+                if (tSort === 'title-desc')
+                    return (b.name || '').localeCompare(a.name || '');
+                if (tSort === 'artist-asc')
+                    return (a.artists || '').localeCompare(b.artists || '');
+                if (tSort === 'artist-desc')
+                    return (b.artists || '').localeCompare(a.artists || '');
+                if (tSort === 'duration-desc')
+                    return (b.duration_ms || 0) - (a.duration_ms || 0);
+                if (tSort === 'duration-asc')
+                    return (a.duration_ms || 0) - (b.duration_ms || 0);
+                return 0;
+            });
+        }
+        let albums = [...searchResults.albums];
+        if (filterStr) {
+            albums = albums.filter(a => (a.name || '').toLowerCase().includes(filterStr) || (a.artists || '').toLowerCase().includes(filterStr));
+        }
+        const alSort = sortOrders.albums;
+        if (alSort !== 'default') {
+            albums.sort((a, b) => {
+                if (alSort === 'title-asc')
+                    return (a.name || '').localeCompare(b.name || '');
+                if (alSort === 'title-desc')
+                    return (b.name || '').localeCompare(a.name || '');
+                if (alSort === 'artist-asc')
+                    return (a.artists || '').localeCompare(b.artists || '');
+                if (alSort === 'artist-desc')
+                    return (b.artists || '').localeCompare(a.artists || '');
+                if (alSort === 'year-desc')
+                    return (b.release_date || '').localeCompare(a.release_date || '');
+                if (alSort === 'year-asc')
+                    return (a.release_date || '').localeCompare(b.release_date || '');
+                return 0;
+            });
+        }
+        let artists = [...searchResults.artists];
+        if (filterStr) {
+            artists = artists.filter(a => (a.name || '').toLowerCase().includes(filterStr));
+        }
+        const arSort = sortOrders.artists;
+        if (arSort !== 'default') {
+            artists.sort((a, b) => {
+                if (arSort === 'name-asc')
+                    return (a.name || '').localeCompare(b.name || '');
+                if (arSort === 'name-desc')
+                    return (b.name || '').localeCompare(a.name || '');
+                return 0;
+            });
+        }
+        let playlists = [...searchResults.playlists];
+        if (filterStr) {
+            playlists = playlists.filter(p => (p.name || '').toLowerCase().includes(filterStr) || (p.owner || '').toLowerCase().includes(filterStr));
+        }
+        const pSort = sortOrders.playlists;
+        if (pSort !== 'default') {
+            playlists.sort((a, b) => {
+                if (pSort === 'title-asc')
+                    return (a.name || '').localeCompare(b.name || '');
+                if (pSort === 'title-desc')
+                    return (b.name || '').localeCompare(a.name || '');
+                if (pSort === 'owner-asc')
+                    return (a.owner || '').localeCompare(b.owner || '');
+                if (pSort === 'owner-desc')
+                    return (b.owner || '').localeCompare(a.owner || '');
+                return 0;
+            });
+        }
+        return { tracks, albums, artists, playlists };
+    }, [searchResults, sortOrders, resultFilter]);
+    const tabs: {
+        key: ResultTab;
+        label: string;
+    }[] = [
+        { key: "tracks", label: "Треки" },
+        { key: "albums", label: "Альбомы" },
+        { key: "artists", label: "Исполнители" },
+        { key: "playlists", label: "Плейлисты" },
+    ];
+    return (<div className="space-y-4">
+      <div className="flex gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="icon" className="shrink-0" onClick={() => onSearchModeChange(!searchMode)}>
+              {searchMode ? (<Link className="h-4 w-4"/>) : (<Search className="h-4 w-4"/>)}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{searchMode ? "Режим ссылок" : "Режим поиска"}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <div className="relative flex-1">
+          {!searchMode ? (<>
+              <InputWithContext id="spotify-url" placeholder={placeholderText} value={url} onChange={(e) => onUrlChange(e.target.value)} onPaste={handlePaste} onKeyDown={(e) => e.key === "Enter" && handleFetchWithValidation()} className="pr-8"/>
+              {url && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => onUrlChange("")}>
+                  <XCircle className="h-4 w-4"/>
+                </button>)}
+            </>) : (<>
+              <InputWithContext id="spotify-search" placeholder={placeholderText} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pr-8"/>
+              {searchQuery && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => {
+                    setSearchQuery("");
+                    setSearchResults(null);
+                    setLastSearchedQuery("");
+                    setResultFilter("");
+                }}>
+                  <XCircle className="h-4 w-4"/>
+                </button>)}
+            </>)}
+        </div>
+
+        {!searchMode && (<>
+            {showRegionSelector && (<Select value={region} onValueChange={onRegionChange}>
+                <SelectTrigger className="w-[70px] shrink-0">
+                  <SelectValue placeholder="Регион"/>
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  {REGIONS.map((r) => (<SelectItem key={r} value={r} textValue={r}>
+                      {r}{" "}
+                      <span className="text-muted-foreground">
+                        ({getRegionName(r)})
+                      </span>
+                    </SelectItem>))}
+                </SelectContent>
+              </Select>)}
+            <Button onClick={handleFetchWithValidation} disabled={loading}>
+              {loading ? (<>
+                  <Spinner />
+                  Загрузка...
+                </>) : (<>
+                  <CloudDownload className="h-4 w-4"/>
+                  Получить
+                </>)}
+            </Button>
+          </>)}
+      </div>
+
+      {!searchMode && !hasResult && (<FetchHistory history={history} onSelect={onHistorySelect} onRemove={onHistoryRemove}/>)}
+
+      {searchMode && (<div className="space-y-4">
+          {!searchQuery && !searchResults && recentSearches.length > 0 && (<div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Недавние поиски</p>
+              <div className="flex flex-wrap gap-2">
+                {recentSearches.map((query) => (<div key={query} className="group relative flex items-center px-3 py-1.5 bg-muted hover:bg-accent rounded-full text-sm cursor-pointer transition-colors" onClick={() => setSearchQuery(query)}>
+                    <span>{query}</span>
+                    <button type="button" className="absolute -top-1.5 -right-1.5 z-10 w-5 h-5 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-sm" onClick={(e) => {
+                        e.stopPropagation();
+                        removeRecentSearch(query);
+                    }}>
+                      <X className="h-3 w-3 text-red-900" strokeWidth={3}/>
+                    </button>
+                  </div>))}
+              </div>
+            </div>)}
+
+          {isSearching && (<div className="flex items-center justify-center py-8">
+              <Spinner />
+              <span className="ml-2 text-muted-foreground">Поиск...</span>
+            </div>)}
+
+          {!isSearching && searchQuery && !hasAnyResults && (<div className="text-center py-8 text-muted-foreground">
+              Ничего не найдено по запросу "{searchQuery}"
+            </div>)}
+
+          {!isSearching && hasAnyResults && (<>
+              <div className="flex gap-1 border-b mb-4">
+                {tabs.map((tab) => {
+                    const count = getTabCount(tab.key);
+                    if (count === 0)
+                        return null;
+                    return (<button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={cn("px-4 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px", activeTab === tab.key
+                            ? "border-primary text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground")}>
+                      {tab.label} ({count})
+                    </button>);
+                })}
+              </div>
+
+              <div className="flex gap-2 mb-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+                  <Input placeholder="Поиск..." value={resultFilter} onChange={(e) => setResultFilter(e.target.value)} className="pl-10 pr-8"/>
+                  {resultFilter && (<button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={() => setResultFilter("")}>
+                      <XCircle className="h-4 w-4"/>
+                    </button>)}
+                </div>
+                <Select value={sortOrders[activeTab]} onValueChange={(val) => setSortOrders(prev => ({ ...prev, [activeTab]: val }))}>
+                  <SelectTrigger className="w-[170px] bg-background gap-1.5">
+                    <ArrowUpDown className="h-4 w-4 text-muted-foreground"/>
+                    <SelectValue placeholder="Сортировка"/>
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">По умолчанию</SelectItem>
+                      {activeTab === 'tracks' && (<>
+                          <SelectItem value="title-asc">Название (А-Я)</SelectItem>
+                          <SelectItem value="title-desc">Название (Я-А)</SelectItem>
+                          <SelectItem value="artist-asc">Исполнитель (А-Я)</SelectItem>
+                          <SelectItem value="artist-desc">Исполнитель (Я-А)</SelectItem>
+                          <SelectItem value="duration-desc">Продолжительность (самые длинные)</SelectItem>
+                          <SelectItem value="duration-asc">Продолжительность (самые короткие)</SelectItem>
+                        </>)}
+                      {activeTab === 'albums' && (<>
+                          <SelectItem value="title-asc">Название (А-Я)</SelectItem>
+                          <SelectItem value="title-desc">Название (Я-А)</SelectItem>
+                          <SelectItem value="artist-asc">Исполнитель (А-Я)</SelectItem>
+                          <SelectItem value="artist-desc">Исполнитель (Я-А)</SelectItem>
+                          <SelectItem value="year-desc">Год (от новых к старым)</SelectItem>
+                          <SelectItem value="year-asc">Год (от старых к новым)</SelectItem>
+                        </>)}
+                      {activeTab === 'artists' && (<>
+                          <SelectItem value="name-asc">Имя (А-Я)</SelectItem>
+                          <SelectItem value="name-desc">Имя (Я-А)</SelectItem>
+                        </>)}
+                      {activeTab === 'playlists' && (<>
+                          <SelectItem value="title-asc">Название (А-Я)</SelectItem>
+                          <SelectItem value="title-desc">Название (Я-А)</SelectItem>
+                          <SelectItem value="owner-asc">Владелец (А-Я)</SelectItem>
+                          <SelectItem value="owner-desc">Владелец (Я-А)</SelectItem>
+                        </>)}
+                    </SelectContent>
+                  </Select>
+              </div>
+
+              <div className="grid gap-2">
+                {activeTab === "tracks" &&
+                    sortedResults.tracks.map((track) => (<button key={track.id} type="button" className="flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent border cursor-pointer text-left transition-colors" onClick={() => handleResultClick(track.external_urls)}>
+                      {track.images ? (<img src={track.images} alt="" className="w-12 h-12 rounded object-cover shrink-0"/>) : (<div className="w-12 h-12 rounded bg-muted shrink-0"/>)}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="font-medium truncate">{track.name}</p>
+                          {track.is_explicit && (<span className="flex items-center justify-center min-w-[16px] h-[16px] rounded bg-red-600 text-[10px] font-bold text-white leading-none shrink-0" title="Explicit">
+                              E
+                            </span>)}
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {track.artists}
+                        </p>
+                      </div>
+                      <span className="text-sm text-muted-foreground shrink-0">
+                        {formatDuration(track.duration_ms || 0)}
+                      </span>
+                    </button>))}
+
+                {activeTab === "albums" &&
+                    sortedResults.albums.map((album) => (<button key={album.id} type="button" className="flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent border cursor-pointer text-left transition-colors" onClick={() => handleResultClick(album.external_urls)}>
+                      {album.images ? (<img src={album.images} alt="" className="w-12 h-12 rounded object-cover shrink-0"/>) : (<div className="w-12 h-12 rounded bg-muted shrink-0"/>)}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{album.name}</p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {album.artists}
+                        </p>
+                      </div>
+                      <span className="text-sm text-muted-foreground shrink-0">
+                        {album.release_date || ""}
+                      </span>
+                    </button>))}
+
+                {activeTab === "artists" &&
+                    sortedResults.artists.map((artist) => (<button key={artist.id} type="button" className="flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent border cursor-pointer text-left transition-colors" onClick={() => handleResultClick(artist.external_urls)}>
+                      {artist.images ? (<img src={artist.images} alt="" className="w-12 h-12 rounded-full object-cover shrink-0"/>) : (<div className="w-12 h-12 rounded-full bg-muted shrink-0"/>)}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{artist.name}</p>
+                        <p className="text-sm text-muted-foreground">Исполнитель</p>
+                      </div>
+                    </button>))}
+
+                {activeTab === "playlists" &&
+                    sortedResults.playlists.map((playlist) => (<button key={playlist.id} type="button" className="flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-accent border cursor-pointer text-left transition-colors" onClick={() => handleResultClick(playlist.external_urls)}>
+                      {playlist.images ? (<img src={playlist.images} alt="" className="w-12 h-12 rounded object-cover shrink-0"/>) : (<div className="w-12 h-12 rounded bg-muted shrink-0"/>)}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{playlist.name}</p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {playlist.owner || ""}
+                        </p>
+                      </div>
+                    </button>))}
+              </div>
+
+              {hasMore[activeTab] && (<div className="flex justify-center pt-2">
+                  <Button variant="outline" onClick={handleLoadMore} disabled={isLoadingMore}>
+                    {isLoadingMore ? (<>
+                        <Spinner />
+                        Загрузка...
+                      </>) : (<>
+                        <ChevronDown className="h-4 w-4"/>
+                        Загрузить еще
+                      </>)}
+                  </Button>
+                </div>)}
+            </>)}
+        </div>)}
+
+      <Dialog open={showInvalidUrlDialog} onOpenChange={setShowInvalidUrlDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Неверная ссылка</DialogTitle>
+            <DialogDescription>
+              В режиме ссылок поддерживаются только ссылки Spotify.
+            </DialogDescription>
+          </DialogHeader>
+
+          {invalidUrl && (<div className="p-3 bg-muted rounded-md border text-xs font-mono break-all opacity-70">
+              {invalidUrl}
+            </div>)}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+            setShowInvalidUrlDialog(false);
+            setInvalidUrl("");
+        }}>
+              Отмена
+            </Button>
+            <Button onClick={() => {
+            onSearchModeChange(true);
+            setShowInvalidUrlDialog(false);
+            setInvalidUrl("");
+        }}>
+              Переключить на поиск
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>);
+}
