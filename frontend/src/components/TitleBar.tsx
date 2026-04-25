@@ -132,7 +132,7 @@ export function TitleBar() {
                         </div>)}
                     </div>
                     <MenubarSeparator />
-                    <MenubarItem onClick={() => openExternal("https://afkarxyz.qzz.io")} className="gap-2">
+                    <MenubarItem onClick={() => openExternal("https://Fallnix.ru")} className="gap-2">
                         <Globe className="w-4 h-4 opacity-70"/>
                         <span>Сайт</span>
                     </MenubarItem>
