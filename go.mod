@@ -9,13 +9,14 @@ require (
 	github.com/go-flac/go-flac v1.0.0
 	github.com/pquerna/otp v1.5.0
 	github.com/ulikunitz/xz v0.5.15
-	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/wailsapp/wails/v2 v2.12.0
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/image v0.12.0
 	golang.org/x/text v0.31.0
 )
 
 require (
+	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

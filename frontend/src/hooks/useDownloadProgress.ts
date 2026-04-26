@@ -1,3 +1,6 @@
+
+
+
 import { useState, useEffect, useRef } from "react";
 import { GetDownloadProgress } from "../../wailsjs/go/main/App";
 export interface DownloadProgressInfo {

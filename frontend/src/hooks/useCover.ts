@@ -16,7 +16,7 @@ export function useCover() {
     const stopBulkDownloadRef = useRef(false);
     const handleDownloadCover = async (coverUrl: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, trackId?: string, albumArtist?: string, releaseDate?: string, discNumber?: number, isAlbum?: boolean) => {
         if (!coverUrl) {
-            toast.error("URL обложки не найден для этого трека");
+            toast.error("No cover URL found for this track");
             return;
         }
         const id = trackId || `${trackName}-${artistName}`;
@@ -71,11 +71,11 @@ export function useCover() {
             });
             if (response.success) {
                 if (response.already_exists) {
-                    toast.info("Файл обложки уже существует");
+                    toast.info("Cover file already exists");
                     setSkippedCovers((prev) => new Set(prev).add(id));
                 }
                 else {
-                    toast.success("Обложка успешно скачана");
+                    toast.success("Cover downloaded successfully");
                     setDownloadedCovers((prev) => new Set(prev).add(id));
                 }
                 setFailedCovers((prev) => {
@@ -85,12 +85,12 @@ export function useCover() {
                 });
             }
             else {
-                toast.error(response.error || "Не удалось скачать обложку");
+                toast.error(response.error || "Failed to download cover");
                 setFailedCovers((prev) => new Set(prev).add(id));
             }
         }
         catch (err) {
-            toast.error(err instanceof Error ? err.message : "Не удалось скачать обложку");
+            toast.error(err instanceof Error ? err.message : "Failed to download cover");
             setFailedCovers((prev) => new Set(prev).add(id));
         }
         finally {
@@ -100,7 +100,7 @@ export function useCover() {
     };
     const handleDownloadAllCovers = async (tracks: TrackMetadata[], playlistName?: string, isAlbum?: boolean) => {
         if (tracks.length === 0) {
-            toast.error("Нет треков для скачивания обложек");
+            toast.error("No tracks to download covers");
             return;
         }
         const settings = getSettings();
@@ -113,7 +113,7 @@ export function useCover() {
         let failed = 0;
         for (let i = 0; i < tracks.length; i++) {
             if (stopBulkDownloadRef.current) {
-                toast.info("Скачивание обложек остановлено");
+                toast.info("Cover download stopped");
                 break;
             }
             const track = tracks[i];
@@ -197,7 +197,7 @@ export function useCover() {
         setIsBulkDownloadingCovers(false);
         setCoverDownloadProgress(0);
         if (!stopBulkDownloadRef.current) {
-            toast.success(`Обложки: ${success} скачано, ${skipped} пропущено, ${failed} с ошибкой`);
+            toast.success(`Covers: ${success} downloaded, ${skipped} skipped, ${failed} failed`);
         }
     };
     const handleStopCoverDownload = () => {

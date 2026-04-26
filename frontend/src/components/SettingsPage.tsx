@@ -1,28 +1,37 @@
 import { useState, useEffect, useCallback } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, Info, ArrowRight, MonitorCog, FolderCog, Router, FolderLock } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, Info, ArrowRight, MonitorCog, FolderCog, Router, FolderLock, Plus, Trash2, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { getSettings, getSettingsWithDefaults, saveSettings, resetToDefaultSettings, applyThemeMode, applyFont, FONT_OPTIONS, FOLDER_PRESETS, FILENAME_PRESETS, TEMPLATE_VARIABLES, type Settings as SettingsType, type FontFamily, type FolderPreset, type FilenamePreset, } from "@/lib/settings";
+import { getSettings, getSettingsWithDefaults, saveSettings, resetToDefaultSettings, applyThemeMode, applyFont, getFontOptions, parseGoogleFontUrl, loadGoogleFontUrl, loadCustomFonts, saveCustomFonts, FOLDER_PRESETS, FILENAME_PRESETS, TEMPLATE_VARIABLES, type Settings as SettingsType, type FontFamily, type CustomFontFamily, type FolderPreset, type FilenamePreset, type ExistingFileCheckMode, } from "@/lib/settings";
 import { themes, applyTheme } from "@/lib/themes";
-import { SelectFolder, OpenConfigFolder } from "../../wailsjs/go/main/App";
+import { SelectFolder, OpenConfigFolder, CheckCustomTidalAPI } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
+import { openExternal } from "@/lib/utils";
 import { ApiStatusTab } from "./ApiStatusTab";
 import { AmazonIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
 interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
 }
+type CustomTidalApiStatus = "idle" | "checking" | "online" | "offline";
 export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: SettingsPageProps) {
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
     const [isDark, setIsDark] = useState(document.documentElement.classList.contains("dark"));
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [showAddFontDialog, setShowAddFontDialog] = useState(false);
+    const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
+    const [addFontUrl, setAddFontUrl] = useState("");
+    const [customTidalApiStatus, setCustomTidalApiStatus] = useState<CustomTidalApiStatus>("idle");
+    const parsedAddFont = parseGoogleFontUrl(addFontUrl);
+    const fontOptions = getFontOptions(tempSettings.customFonts);
     const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
     const resetToSaved = useCallback(() => {
         const freshSavedSettings = getSettings();
@@ -55,14 +64,20 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     useEffect(() => {
         applyThemeMode(tempSettings.themeMode);
         applyTheme(tempSettings.theme);
-        applyFont(tempSettings.fontFamily);
+        applyFont(tempSettings.fontFamily, tempSettings.customFonts);
         setTimeout(() => {
             setIsDark(document.documentElement.classList.contains("dark"));
         }, 0);
-    }, [tempSettings.themeMode, tempSettings.theme, tempSettings.fontFamily]);
+    }, [tempSettings.themeMode, tempSettings.theme, tempSettings.fontFamily, tempSettings.customFonts]);
+    useEffect(() => {
+        if (showAddFontDialog && parsedAddFont) {
+            loadGoogleFontUrl(parsedAddFont.url, "spotiflac-add-font-preview");
+        }
+    }, [showAddFontDialog, parsedAddFont]);
     useEffect(() => {
         const loadDefaults = async () => {
-            if (!savedSettings.downloadPath) {
+            const currentSettings = getSettings();
+            if (!currentSettings.downloadPath) {
                 const settingsWithDefaults = await getSettingsWithDefaults();
                 setSavedSettings(settingsWithDefaults);
                 setTempSettings(settingsWithDefaults);
@@ -71,10 +86,18 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         };
         loadDefaults();
     }, []);
+    useEffect(() => {
+        const syncCustomFonts = async () => {
+            const customFonts = await loadCustomFonts();
+            setSavedSettings((prev) => ({ ...prev, customFonts }));
+            setTempSettings((prev) => ({ ...prev, customFonts }));
+        };
+        void syncCustomFonts();
+    }, []);
     const handleSave = async () => {
         await saveSettings(tempSettings);
         setSavedSettings(tempSettings);
-        toast.success("Настройки сохранены");
+        toast.success("Settings saved");
         onUnsavedChangesChange?.(false);
     };
     const handleReset = async () => {
@@ -83,9 +106,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
         applyTheme(defaultSettings.theme);
-        applyFont(defaultSettings.fontFamily);
+        applyFont(defaultSettings.fontFamily, defaultSettings.customFonts);
         setShowResetConfirm(false);
-        toast.success("Настройки сброшены по умолчанию");
+        toast.success("Settings reset to default");
     };
     const handleBrowseFolder = async () => {
         try {
@@ -96,20 +119,102 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         }
         catch (error) {
             console.error("Error selecting folder:", error);
-            toast.error(`Ошибка выбора папки: ${error}`);
+            toast.error(`Error selecting folder: ${error}`);
         }
+    };
+    const closeAddFontDialog = () => {
+        setShowAddFontDialog(false);
+        setAddFontUrl("");
+    };
+    const handleAddFont = async () => {
+        if (!parsedAddFont) {
+            toast.error("Enter a valid Google Fonts URL");
+            return;
+        }
+        const existingFonts = tempSettings.customFonts || [];
+        const existingIndex = existingFonts.findIndex((font) => font.value === parsedAddFont.value || font.url === parsedAddFont.url);
+        const customFonts = existingIndex >= 0
+            ? existingFonts.map((font, index) => index === existingIndex ? parsedAddFont : font)
+            : [...existingFonts, parsedAddFont];
+        const savedCustomFonts = await saveCustomFonts(customFonts);
+        setSavedSettings((prev) => ({ ...prev, customFonts: savedCustomFonts }));
+        setTempSettings((prev) => ({
+            ...prev,
+            customFonts: savedCustomFonts,
+            fontFamily: parsedAddFont.value,
+        }));
+        closeAddFontDialog();
+        toast.success(`${parsedAddFont.label} added`);
+    };
+    const handleDeleteCustomFont = async (fontValue: CustomFontFamily) => {
+        const customFonts = (tempSettings.customFonts || []).filter((font) => font.value !== fontValue);
+        const savedCustomFonts = await saveCustomFonts(customFonts);
+        const shouldResetSavedFont = savedSettings.fontFamily === fontValue;
+        const shouldResetTempFont = tempSettings.fontFamily === fontValue;
+        const nextSavedSettings: SettingsType = {
+            ...savedSettings,
+            customFonts: savedCustomFonts,
+            fontFamily: shouldResetSavedFont ? "google-sans" : savedSettings.fontFamily,
+        };
+        setSavedSettings(nextSavedSettings);
+        setTempSettings((prev) => ({
+            ...prev,
+            customFonts: savedCustomFonts,
+            fontFamily: shouldResetTempFont ? "google-sans" : prev.fontFamily,
+        }));
+        if (shouldResetSavedFont) {
+            await saveSettings(nextSavedSettings);
+        }
+        toast.success("Font deleted");
     };
     const handleTidalQualityChange = async (value: "LOSSLESS" | "HI_RES_LOSSLESS") => {
         setTempSettings((prev) => ({ ...prev, tidalQuality: value }));
-    };
-    const handleTidalVariantChange = (value: "tidal" | "alt") => {
-        setTempSettings((prev) => ({ ...prev, tidalVariant: value }));
     };
     const handleQobuzQualityChange = (value: "6" | "7" | "27") => {
         setTempSettings((prev) => ({ ...prev, qobuzQuality: value }));
     };
     const handleAutoQualityChange = async (value: "16" | "24") => {
         setTempSettings((prev) => ({ ...prev, autoQuality: value }));
+    };
+    const persistCustomTidalApi = useCallback(async (nextValue: string) => {
+        const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
+        const persistedSettings = getSettings();
+        const nextSavedSettings: SettingsType = {
+            ...persistedSettings,
+            customTidalApi: normalizedValue,
+        };
+        await saveSettings(nextSavedSettings);
+        setSavedSettings((prev) => ({
+            ...prev,
+            customTidalApi: normalizedValue,
+        }));
+        setTempSettings((prev) => ({
+            ...prev,
+            customTidalApi: normalizedValue,
+        }));
+    }, []);
+    const handleCheckCustomTidalApi = async () => {
+        const normalizedCustomTidalApi = (tempSettings.customTidalApi || "").trim().replace(/\/+$/g, "");
+        if (!normalizedCustomTidalApi.startsWith("https://")) {
+            toast.error("Enter a valid HTTPS HiFi API URL");
+            return;
+        }
+        setCustomTidalApiStatus("checking");
+        try {
+            const isOnline = await CheckCustomTidalAPI(normalizedCustomTidalApi);
+            setCustomTidalApiStatus(isOnline ? "online" : "offline");
+            if (isOnline) {
+                toast.success("HiFi API instance is online");
+            }
+            else {
+                toast.error("HiFi API instance is offline");
+            }
+        }
+        catch (error) {
+            console.error("Failed to check custom Tidal API:", error);
+            setCustomTidalApiStatus("offline");
+            toast.error(`Failed to check HiFi API instance: ${error}`);
+        }
     };
     const [activeTab, setActiveTab] = useState<"general" | "files" | "api">("general");
     return (<div className="space-y-4 h-full flex flex-col">
@@ -121,15 +226,15 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 await OpenConfigFolder();
             }
             catch (e) {
-                toast.error(`Не удалось открыть папку конфигурации: ${e}`);
+                toast.error(`Failed to open config folder: ${e}`);
             }
         }} className="gap-1.5">
             <FolderLock className="h-4 w-4"/>
-            Папка с конфигурацией
+            Открыть конфиг
           </Button>
           <Button variant="outline" onClick={() => setShowResetConfirm(true)} className="gap-1.5">
             <RotateCcw className="h-4 w-4"/>
-            Сбросить
+            По умолчанию
           </Button>
           <Button onClick={handleSave} className="gap-1.5">
             <Save className="h-4 w-4"/>
@@ -149,7 +254,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         </Button>
         <Button variant={activeTab === "api" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("api")} className="rounded-b-none gap-2">
           <Router className="h-4 w-4"/>
-          Статус API
+          Статус
         </Button>
       </div>
 
@@ -157,7 +262,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         {activeTab === "general" && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="download-path">Путь для сохранения</Label>
+                <Label htmlFor="download-path">Путь скачивания</Label>
                 <div className="flex gap-2">
                   <InputWithContext id="download-path" value={tempSettings.downloadPath} onChange={(e) => setTempSettings((prev) => ({
                 ...prev,
@@ -165,19 +270,19 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             }))} placeholder="C:\Users\YourUsername\Music"/>
                   <Button type="button" onClick={handleBrowseFolder} className="gap-1.5">
                     <FolderOpen className="h-4 w-4"/>
-                    Обзор...
+                    Обзор
                   </Button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="theme-mode">Режим темы</Label>
+                <Label htmlFor="theme-mode">Тема</Label>
                 <Select value={tempSettings.themeMode} onValueChange={(value: "auto" | "light" | "dark") => setTempSettings((prev) => ({ ...prev, themeMode: value }))}>
                   <SelectTrigger id="theme-mode">
-                    <SelectValue placeholder="Выберите режим"/>
+                    <SelectValue placeholder="Select theme mode"/>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Как в системе (Авто)</SelectItem>
+                    <SelectItem value="auto">Авто</SelectItem>
                     <SelectItem value="light">Светлая</SelectItem>
                     <SelectItem value="dark">Темная</SelectItem>
                   </SelectContent>
@@ -185,10 +290,10 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="theme">Основной цвет</Label>
+                <Label htmlFor="theme">Цвет</Label>
                 <Select value={tempSettings.theme} onValueChange={(value) => setTempSettings((prev) => ({ ...prev, theme: value }))}>
                   <SelectTrigger id="theme">
-                    <SelectValue placeholder="Выберите цвет"/>
+                    <SelectValue placeholder="Select a theme"/>
                   </SelectTrigger>
                   <SelectContent>
                     {themes.map((theme) => (<SelectItem key={theme.name} value={theme.name}>
@@ -206,19 +311,40 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="font">Шрифт текста</Label>
-                <Select value={tempSettings.fontFamily} onValueChange={(value: FontFamily) => setTempSettings((prev) => ({ ...prev, fontFamily: value }))}>
-                  <SelectTrigger id="font">
-                    <SelectValue placeholder="Выберите шрифт"/>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.map((font) => (<SelectItem key={font.value} value={font.value}>
-                        <span style={{ fontFamily: font.fontFamily }}>
-                          {font.label}
-                        </span>
-                      </SelectItem>))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="font">Шрифт</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={tempSettings.fontFamily} onValueChange={(value: FontFamily) => setTempSettings((prev) => ({ ...prev, fontFamily: value }))}>
+                    <SelectTrigger id="font" className="max-w-full min-w-40">
+                      <SelectValue placeholder="Select a font"/>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fontOptions.map((font) => {
+                const isCustomFont = font.value.startsWith("custom-");
+                return (<SelectItem key={font.value} value={font.value} indicatorPosition="inline" trailingAction={isCustomFont ? (<Button type="button" variant="ghost" size="icon" className="h-8 w-8 cursor-pointer text-muted-foreground hover:bg-transparent hover:text-destructive" aria-label={`Delete ${font.label}`} onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }} onPointerUp={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }} onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleDeleteCustomFont(font.value as CustomFontFamily);
+                        }}>
+                              <Trash2 className="h-3.5 w-3.5 text-inherit"/>
+                            </Button>) : undefined}>
+                          <span style={{ fontFamily: font.fontFamily }}>
+                            {font.label}
+                          </span>
+                        </SelectItem>);
+            })}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" onClick={() => setShowAddFontDialog(true)} className="shrink-0 gap-1.5">
+                    <Plus className="h-4 w-4"/>
+                    Добавить
+                  </Button>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 pt-2">
@@ -234,14 +360,14 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="link-resolver">Расшифровщик ссылок</Label>
+                <Label htmlFor="link-resolver">Поиск ссылок</Label>
                 <div className="flex items-center gap-3 flex-wrap">
                   <Select value={tempSettings.linkResolver} onValueChange={(value: "songstats" | "songlink") => setTempSettings((prev) => ({
                 ...prev,
                 linkResolver: value,
             }))}>
-                    <SelectTrigger id="link-resolver" className="h-9 w-fit min-w-[140px]">
-                      <SelectValue placeholder="Выберите сервис"/>
+                    <SelectTrigger id="link-resolver" className="h-9 w-fit min-w-35">
+                      <SelectValue placeholder="Select a link resolver"/>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="songlink">
@@ -265,21 +391,21 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 allowResolverFallback: checked,
             }))}/>
                     <Label htmlFor="allow-link-resolver-fallback" className="text-sm font-normal cursor-pointer">
-                      Разрешить резервный поиск
+                      Использовать резервный
                     </Label>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="downloader">Источник загрузки</Label>
-                <div className="flex gap-2 flex-wrap">
-                  <Select value={tempSettings.downloader} onValueChange={(value: any) => setTempSettings((prev) => ({
+                <Label htmlFor="downloader">Источник</Label>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Select value={tempSettings.downloader} onValueChange={(value: SettingsType["downloader"]) => setTempSettings((prev) => ({
                 ...prev,
                 downloader: value,
             }))}>
                     <SelectTrigger id="downloader" className="h-9 w-fit">
-                      <SelectValue placeholder="Выберите источник"/>
+                      <SelectValue placeholder="Select a source"/>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="auto">Авто</SelectItem>
@@ -306,11 +432,11 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                   </Select>
 
                   {tempSettings.downloader === "auto" && (<>
-                      <Select value={tempSettings.autoOrder || "tidal-qobuz-amazon"} onValueChange={(value: any) => setTempSettings((prev) => ({
+                      <Select value={tempSettings.autoOrder || "tidal-qobuz-amazon"} onValueChange={(value: string) => setTempSettings((prev) => ({
                     ...prev,
                     autoOrder: value,
                 }))}>
-                        <SelectTrigger className="h-9 w-fit min-w-[140px]">
+                        <SelectTrigger className="h-9 w-fit min-w-35">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -427,9 +553,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       </Select>
                     </>)}
 
-                  {tempSettings.downloader === "tidal" && (tempSettings.tidalVariant === "alt" ? (<div className="h-9 px-3 flex items-center text-sm font-medium border border-input rounded-md bg-muted/30 text-muted-foreground whitespace-nowrap cursor-default">
-                        16-bit/44.1kHz
-                      </div>) : (<Select value={tempSettings.tidalQuality} onValueChange={handleTidalQualityChange}>
+                  {tempSettings.downloader === "tidal" && (<Select value={tempSettings.tidalQuality} onValueChange={handleTidalQualityChange}>
                         <SelectTrigger className="h-9 w-fit">
                           <SelectValue />
                         </SelectTrigger>
@@ -439,7 +563,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                             24-bit/48kHz
                           </SelectItem>
                         </SelectContent>
-                      </Select>))}
+                      </Select>)}
 
                   {tempSettings.downloader === "qobuz" && (<Select value={tempSettings.qobuzQuality} onValueChange={handleQobuzQualityChange}>
                       <SelectTrigger className="h-9 w-fit">
@@ -457,57 +581,45 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
 
                 </div>
 
-                {(tempSettings.downloader === "tidal" || tempSettings.downloader === "auto") && (<div className="space-y-2 pt-2">
-                    <Label htmlFor="tidal-variant">Api Tidal</Label>
-                    <Select value={tempSettings.tidalVariant || "tidal"} onValueChange={handleTidalVariantChange}>
-                      <SelectTrigger id="tidal-variant" className="h-9 w-fit min-w-[160px]">
-                        <SelectValue placeholder="Выберите опцию"/>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tidal">Tidal</SelectItem>
-                        <SelectItem value="alt">Tidal Alt.</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>)}
-
                 {((tempSettings.downloader === "tidal" &&
-                tempSettings.tidalVariant !== "alt" &&
                 tempSettings.tidalQuality === "HI_RES_LOSSLESS") ||
                 (tempSettings.downloader === "qobuz" &&
                     tempSettings.qobuzQuality === "27") ||
                 (tempSettings.downloader === "auto" &&
                     tempSettings.autoQuality === "24")) && (<div className="flex items-center gap-3 pt-2">
-                    <div className="flex items-center gap-3">
                       <Switch id="allow-fallback" checked={tempSettings.allowFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
                     ...prev,
                     allowFallback: checked,
                 }))}/>
                       <Label htmlFor="allow-fallback" className="text-sm font-normal cursor-pointer">
-                        Разрешить снижение качества (до 16-bit)
+                        Разрешить 16-bit (Если нет Hi-Res)
                       </Label>
+                  </div>)}
+
+                {(tempSettings.downloader === "auto" || tempSettings.downloader === "tidal") && (<div className="space-y-2 pt-2">
+                    <Label>Свой сервер Tidal</Label>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" onClick={() => setShowCustomTidalApiDialog(true)} className="gap-2">
+                        <TidalIcon />
+                        Настроить
+                      </Button>
+                      {tempSettings.customTidalApi && (<span className="max-w-[260px] truncate text-xs text-muted-foreground" title={tempSettings.customTidalApi}>
+                          {tempSettings.customTidalApi}
+                        </span>)}
                     </div>
                   </div>)}
               </div>
 
-              <div className="border-t pt-6"/>
+              <div className="border-t pt-2"/>
 
               <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Switch id="embed-lyrics" checked={tempSettings.embedLyrics} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                embedLyrics: checked,
-            }))}/>
-                  <Label htmlFor="embed-lyrics" className="cursor-pointer text-sm font-normal">
-                    Вшивать текст песен (Lyrics)
-                  </Label>
-                </div>
                 <div className="flex items-center gap-3">
                   <Switch id="embed-max-quality-cover" checked={tempSettings.embedMaxQualityCover} onCheckedChange={(checked) => setTempSettings((prev) => ({
                 ...prev,
                 embedMaxQualityCover: checked,
             }))}/>
                   <Label htmlFor="embed-max-quality-cover" className="cursor-pointer text-sm font-normal">
-                    Вшивать обложку макс. качества
+                    Вшивать макс. качество обложки
                   </Label>
                 </div>
                 <div className="flex items-center gap-3">
@@ -516,7 +628,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 embedGenre: checked,
             }))}/>
                   <Label htmlFor="embed-genre" className="cursor-pointer text-sm font-normal">
-                    Вшивать жанр
+                    Вшивать жанры
                   </Label>
                 </div>
                 {tempSettings.embedGenre && (<div className="flex items-center gap-3">
@@ -525,9 +637,18 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     useSingleGenre: checked,
                 }))}/>
                     <Label htmlFor="use-single-genre" className="text-sm cursor-pointer font-normal">
-                      Оставлять только первый жанр
+                      Один жанр
                     </Label>
                   </div>)}
+                <div className="flex items-center gap-3">
+                  <Switch id="embed-lyrics" checked={tempSettings.embedLyrics} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                embedLyrics: checked,
+            }))}/>
+                  <Label htmlFor="embed-lyrics" className="cursor-pointer text-sm font-normal">
+                    Вшивать текст песни
+                  </Label>
+                </div>
               </div>
             </div>
           </div>)}
@@ -543,7 +664,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     </TooltipTrigger>
                     <TooltipContent side="top">
                       <p className="text-xs whitespace-nowrap">
-                        Переменные:{" "}
+                        Variables:{" "}
                         {TEMPLATE_VARIABLES.map((v) => v.key).join(", ")}
                       </p>
                     </TooltipContent>
@@ -575,7 +696,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 }))} placeholder="{artist}/{album}" className="h-9 text-sm flex-1"/>)}
                 </div>
                 {tempSettings.folderTemplate && (<p className="text-xs text-muted-foreground">
-                    Пример:{" "}
+                    Preview:{" "}
                     <span className="font-mono">
                       {tempSettings.folderTemplate
                     .replace(/\{artist\}/g, tempSettings.separator === "comma" ? "Kendrick Lamar, SZA" : "Kendrick Lamar; SZA")
@@ -598,7 +719,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 createPlaylistFolder: checked,
             }))}/>
                 <Label htmlFor="create-playlist-folder" className="text-sm cursor-pointer font-normal">
-                  Отдельные папки для плейлистов
+                  Папка для плейлиста
                 </Label>
               </div>
 
@@ -608,7 +729,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 playlistOwnerFolderName: checked,
             }))}/>
                 <Label htmlFor="playlist-owner-folder-name" className="text-sm cursor-pointer font-normal">
-                  Использовать имя создателя в названии плейлиста
+                  Имя создателя в названии папки плейлиста
                 </Label>
               </div>
 
@@ -618,7 +739,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 createM3u8File: checked,
             }))}/>
                 <Label htmlFor="create-m3u8-file" className="text-sm cursor-pointer font-normal">
-                  Создавать .M3U8 файлы плейлистов
+                  Файл плейлиста M3U8
                 </Label>
               </div>
 
@@ -628,7 +749,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 useFirstArtistOnly: checked,
             }))}/>
                 <Label htmlFor="use-first-artist-only" className="text-sm cursor-pointer font-normal">
-                  Использовать только первого исполнителя
+                  Только первый исполнитель
                 </Label>
               </div>
 
@@ -638,23 +759,40 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 redownloadWithSuffix: checked,
             }))}/>
                 <Label htmlFor="redownload-with-suffix" className="text-sm cursor-pointer font-normal">
-                  Перекачивать с добавлением суффикса (если дубль)
+                  Перекачивать с суффиксом
                 </Label>
               </div>
 
 
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="existing-file-check-mode">Проверка существующих файлов</Label>
+                <Select value={tempSettings.existingFileCheckMode} onValueChange={(value: ExistingFileCheckMode) => setTempSettings((prev) => ({
+                ...prev,
+                existingFileCheckMode: value,
+            }))}>
+                  <SelectTrigger id="existing-file-check-mode">
+                    <SelectValue placeholder="Select existing file check mode"/>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="filename">Filename</SelectItem>
+                    <SelectItem value="isrc">ISRC</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label className="text-sm">Формат Имени Файла</Label>
+                <Label className="text-sm">Формат имени файла</Label>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help"/>
                   </TooltipTrigger>
                   <TooltipContent side="top">
                     <p className="text-xs whitespace-nowrap">
-                      Переменные:{" "}
+                      Variables:{" "}
                       {TEMPLATE_VARIABLES.map((v) => v.key).join(", ")}
                     </p>
                   </TooltipContent>
@@ -686,7 +824,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 }))} placeholder="{track}. {title}" className="h-9 text-sm flex-1"/>)}
               </div>
               <div className="space-y-2 pt-2">
-                <Label className="text-sm">Разделитель исполнителей</Label>
+                <Label className="text-sm">Separator</Label>
                 <div className="flex gap-2">
                   <Select value={tempSettings.separator} onValueChange={(value: "comma" | "semicolon") => setTempSettings((prev) => ({
                 ...prev,
@@ -696,15 +834,15 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="comma">Запятая (,)</SelectItem>
-                      <SelectItem value="semicolon">Точка с запятой (;)</SelectItem>
+                      <SelectItem value="comma">Comma (,)</SelectItem>
+                      <SelectItem value="semicolon">Semicolon (;)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               {tempSettings.filenameTemplate && (<p className="text-xs text-muted-foreground">
-                  Пример:{" "}
+                  Preview:{" "}
                   <span className="font-mono">
                     {tempSettings.filenameTemplate
                     .replace(/\{artist\}/g, tempSettings.separator === "comma" ? "Kendrick Lamar, SZA" : "Kendrick Lamar; SZA")
@@ -719,26 +857,126 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     .flac
                   </span>
                 </p>)}
-                
+              </div>
             </div>
           </div>)}
         
         {activeTab === "api" && (<ApiStatusTab />)}
       </div>
 
+      <Dialog open={showAddFontDialog} onOpenChange={(open) => open ? setShowAddFontDialog(true) : closeAddFontDialog()}>
+        <DialogContent className="sm:max-w-115 [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>Add Font</DialogTitle>
+              <button type="button" onClick={() => openExternal("https://fonts.google.com")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Open Google Fonts
+                <ExternalLink className="h-3 w-3"/>
+              </button>
+            </div>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="google-font-url">Google Font URL</Label>
+              <Input id="google-font-url" value={addFontUrl} onChange={(event) => setAddFontUrl(event.target.value)} onKeyDown={(event) => {
+            if (event.key === "Enter" && parsedAddFont) {
+                void handleAddFont();
+            }
+        }} placeholder="https://fonts.google.com/specimen/Ubuntu" autoFocus/>
+              {addFontUrl.trim() && !parsedAddFont && (<p className="text-xs text-destructive">
+                  Enter a valid Google Fonts URL.
+                </p>)}
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Preview
+              </p>
+              <p className="text-2xl font-semibold leading-tight" style={{ fontFamily: parsedAddFont?.fontFamily }}>
+                Aa The quick brown fox
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground" style={{ fontFamily: parsedAddFont?.fontFamily }}>
+                Kendrick Lamar - All The Stars
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAddFontDialog}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleAddFont()} disabled={!parsedAddFont}>
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>Custom Instance</DialogTitle>
+              <button type="button" onClick={() => openExternal("https://github.com/binimum/hifi-api")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+                How to create your own instance
+                <ExternalLink className="h-3 w-3"/>
+              </button>
+            </div>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="custom-tidal-api">Instance URL</Label>
+              <div className="flex gap-2">
+                <Input id="custom-tidal-api" type="url" value={tempSettings.customTidalApi || ""} onChange={(e) => {
+            const nextValue = e.target.value.replace(/\/+$/g, "");
+            setCustomTidalApiStatus("idle");
+            void persistCustomTidalApi(nextValue);
+        }} placeholder="https://your-hifi-api.example"/>
+                <Button type="button" variant="outline" onClick={() => void handleCheckCustomTidalApi()} disabled={!((tempSettings.customTidalApi || "").trim().startsWith("https://")) || customTidalApiStatus === "checking"}>
+                  {customTidalApiStatus === "checking" ? "Checking..." : "Check"}
+                </Button>
+                {tempSettings.customTidalApi && (<Button type="button" variant="outline" size="icon" onClick={() => {
+                setCustomTidalApiStatus("idle");
+                void persistCustomTidalApi("");
+            }}>
+                    <Trash2 className="h-4 w-4 text-destructive"/>
+                  </Button>)}
+              </div>
+            </div>
+            {customTidalApiStatus !== "idle" && (<p className={`text-xs ${customTidalApiStatus === "online"
+                ? "text-green-600 dark:text-green-400"
+                : customTidalApiStatus === "offline"
+                    ? "text-destructive"
+                    : "text-muted-foreground"}`}>
+                {customTidalApiStatus === "online"
+                ? "Custom HiFi API instance is online."
+                : customTidalApiStatus === "offline"
+                    ? "Custom HiFi API instance is offline or returned preview-only data."
+                    : "Checking custom HiFi API instance..."}
+              </p>)}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCustomTidalApiDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <DialogContent className="max-w-md [&>button]:hidden">
           <DialogHeader>
-            <DialogTitle>Сбросить настройки?</DialogTitle>
+            <DialogTitle>Reset to Default?</DialogTitle>
             <DialogDescription>
-              Это действие вернет все настройки к значениям по умолчанию. Все ваши текущие параметры будут стерты без возможности восстановления.
+              This will reset all settings to their default values. Your custom
+              font list will be kept.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowResetConfirm(false)}>
-              Отмена
+              Cancel
             </Button>
-            <Button onClick={handleReset}>Сбросить настройки</Button>
+            <Button onClick={handleReset}>Reset</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

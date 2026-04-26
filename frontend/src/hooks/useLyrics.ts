@@ -9,13 +9,17 @@ const GetTrackISRC = (spotifyId: string): Promise<string> => (window as any)["go
 async function resolveTemplateISRC(settings: {
     folderTemplate?: string;
     filenameTemplate?: string;
+    existingFileCheckMode?: string;
 }, spotifyId?: string): Promise<string> {
     if (!spotifyId) {
         return "";
     }
     const folderTemplate = settings.folderTemplate || "";
     const filenameTemplate = settings.filenameTemplate || "";
-    if (!folderTemplate.includes("{isrc}") && !filenameTemplate.includes("{isrc}")) {
+    const shouldResolveISRC = settings.existingFileCheckMode === "isrc" ||
+        folderTemplate.includes("{isrc}") ||
+        filenameTemplate.includes("{isrc}");
+    if (!shouldResolveISRC) {
         return "";
     }
     try {
@@ -35,7 +39,7 @@ export function useLyrics() {
     const stopBulkDownloadRef = useRef(false);
     const handleDownloadLyrics = async (spotifyId: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, albumArtist?: string, releaseDate?: string, discNumber?: number, isAlbum?: boolean) => {
         if (!spotifyId) {
-            toast.error("Spotify ID не найден для этого трека");
+            toast.error("Не найден Spotify ID для этого трека");
             return;
         }
         logger.info(`downloading lyrics: ${trackName} - ${artistName}`);
@@ -93,7 +97,7 @@ export function useLyrics() {
             });
             if (response.success) {
                 if (response.already_exists) {
-                    toast.info("Файл текста песни уже существует");
+                    toast.info("Файл с текстом песни уже существует");
                     setSkippedLyrics((prev) => new Set(prev).add(spotifyId));
                 }
                 else {
@@ -107,12 +111,12 @@ export function useLyrics() {
                 });
             }
             else {
-                toast.error(response.error || "Не удалось скачать текст песни");
+                toast.error(response.error || "Ошибка скачивания текста песни");
                 setFailedLyrics((prev) => new Set(prev).add(spotifyId));
             }
         }
         catch (err) {
-            toast.error(err instanceof Error ? err.message : "Не удалось скачать текст песни");
+            toast.error(err instanceof Error ? err.message : "Ошибка скачивания текста песни");
             setFailedLyrics((prev) => new Set(prev).add(spotifyId));
         }
         finally {
@@ -137,7 +141,7 @@ export function useLyrics() {
         for (let i = 0; i < tracksWithSpotifyId.length; i++) {
             const track = tracksWithSpotifyId[i];
             if (stopBulkDownloadRef.current) {
-                toast.info("Скачивание текста песни остановлено");
+                toast.info("Скачивание текстов остановлено");
                 break;
             }
             const id = track.spotify_id!;
@@ -225,7 +229,7 @@ export function useLyrics() {
         setIsBulkDownloadingLyrics(false);
         setLyricsDownloadProgress(0);
         if (!stopBulkDownloadRef.current) {
-            toast.success(`Тексты: ${success} скачано, ${skipped} пропущено, ${failed} с ошибкой`);
+            toast.success(`Тексты: ${success} скачано, ${skipped} пропущено, ${failed} ошибок`);
         }
     };
     const handleStopLyricsDownload = () => {

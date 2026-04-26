@@ -48,6 +48,7 @@ interface ArtistInfoProps {
     isDownloading: boolean;
     bulkDownloadType: "all" | "selected" | null;
     downloadProgress: number;
+    downloadRemainingCount: number;
     currentDownloadInfo: {
         name: string;
         artists: string;
@@ -95,7 +96,7 @@ interface ArtistInfoProps {
     onTrackClick?: (track: TrackMetadata) => void;
     onBack?: () => void;
 }
-export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, downloadingTrack, isDownloading, bulkDownloadType, downloadProgress, currentDownloadInfo, currentPage, itemsPerPage, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, isBulkDownloadingCovers, isBulkDownloadingLyrics, isMetadataLoading = false, onSearchChange, onSortChange, onToggleTrack, onToggleSelectAll, onDownloadTrack, onDownloadLyrics, onDownloadCover, onCheckAvailability, onDownloadAllLyrics, onDownloadAllCovers, onDownloadAll, onDownloadSelected, onStopDownload, onOpenFolder, onAlbumClick, onArtistClick, onPageChange, onTrackClick, onBack, }: ArtistInfoProps) {
+export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, downloadingTrack, isDownloading, bulkDownloadType, downloadProgress, downloadRemainingCount, currentDownloadInfo, currentPage, itemsPerPage, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, isBulkDownloadingCovers, isBulkDownloadingLyrics, isMetadataLoading = false, onSearchChange, onSortChange, onToggleTrack, onToggleSelectAll, onDownloadTrack, onDownloadLyrics, onDownloadCover, onCheckAvailability, onDownloadAllLyrics, onDownloadAllCovers, onDownloadAll, onDownloadSelected, onStopDownload, onOpenFolder, onAlbumClick, onArtistClick, onPageChange, onTrackClick, onBack, }: ArtistInfoProps) {
     const [downloadingHeader, setDownloadingHeader] = useState(false);
     const [downloadingAvatar, setDownloadingAvatar] = useState(false);
     const [downloadingGalleryIndex, setDownloadingGalleryIndex] = useState<number | null>(null);
@@ -109,11 +110,11 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
     const fetchedTrackCount = trackList.length;
     const albumCountLabel = isMetadataLoading && totalAlbumCount > 0 && fetchedAlbumCount < totalAlbumCount
         ? `${fetchedAlbumCount.toLocaleString()} / ${totalAlbumCount.toLocaleString()} альбомов`
-        : `${displayedAlbumCount.toLocaleString()} альбом(ов)`;
+        : `${displayedAlbumCount.toLocaleString()} альбомов`;
     const resolvedTrackCount = totalTrackCount > 0 ? totalTrackCount : fetchedTrackCount;
     const trackCountLabel = isMetadataLoading && totalTrackCount > 0 && fetchedTrackCount < totalTrackCount
         ? `${fetchedTrackCount.toLocaleString()} / ${totalTrackCount.toLocaleString()} треков`
-        : `${resolvedTrackCount.toLocaleString()} трек(ов)`;
+        : `${resolvedTrackCount.toLocaleString()} треков`;
     const albumFilterCounts = useMemo(() => {
         const counts = new Map<string, number>();
         counts.set("all", (albumList || []).length);
@@ -166,7 +167,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
     const formatAlbumFilterLabel = (value: string) => {
         const count = albumFilterCounts.get(value) || 0;
         if (value === "all")
-            return `Все (${count})`;
+            return `All (${count})`;
         const label = value
             .split(/[_\s]+/)
             .filter(Boolean)
@@ -194,11 +195,11 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                 }
             }
             else {
-                toast.error(response.error || "Не удалось скачать шапку");
+                toast.error(response.error || "Ошибка скачивания шапки");
             }
         }
         catch (error) {
-            toast.error(`Ошибка при скачивании шапки: ${error}`);
+            toast.error(`Error downloading header: ${error}`);
         }
         finally {
             setDownloadingHeader(false);
@@ -224,11 +225,11 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                 }
             }
             else {
-                toast.error(response.error || "Не удалось скачать аватар");
+                toast.error(response.error || "Ошибка скачивания аватара");
             }
         }
         catch (error) {
-            toast.error(`Ошибка при скачивании аватара: ${error}`);
+            toast.error(`Error downloading avatar: ${error}`);
         }
         finally {
             setDownloadingAvatar(false);
@@ -253,11 +254,11 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                 }
             }
             else {
-                toast.error(response.error || `Не удалось скачать изображение галереи ${index + 1}`);
+                toast.error(response.error || `Ошибка скачивания изображения ${index + 1}`);
             }
         }
         catch (error) {
-            toast.error(`Ошибка при скачивании изображения галереи ${index + 1}: ${error}`);
+            toast.error(`Error downloading gallery image ${index + 1}: ${error}`);
         }
         finally {
             setDownloadingGalleryIndex(null);
@@ -299,7 +300,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
             }
             if (failCount === 0) {
                 if (existsCount > 0 && successCount > 0) {
-                    toast.success(`Скачано ${successCount} изображений, ${existsCount} уже существовали`);
+                    toast.success(`Скачано ${successCount} изображений, ${existsCount} уже существовало`);
                 }
                 else if (existsCount > 0) {
                     toast.info(`Все ${existsCount} изображений уже существуют`);
@@ -313,7 +314,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
             }
         }
         catch (error) {
-            toast.error(`Ошибка при скачивании изображений галереи: ${error}`);
+            toast.error(`Error downloading gallery images: ${error}`);
         }
         finally {
             setDownloadingAllGallery(false);
@@ -325,7 +326,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
         {artistInfo.header ? (<>
             <div className="relative w-full h-64 bg-cover bg-center">
               <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${artistInfo.header})` }}/>
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent"/>
+              <div className="absolute inset-0 bg-linear-to-t from-black via-black/50 to-transparent"/>
               {onBack && (<div className="absolute top-4 right-4 z-10">
                   <Button variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/20 hover:text-white">
                       <XCircle className="h-5 w-5"/>
@@ -369,13 +370,13 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     {artistInfo.biography && (<p className="text-sm text-white/90 line-clamp-4">{artistInfo.biography}</p>)}
                     <div className="flex items-center gap-2 text-sm flex-wrap text-white/90">
                       {artistInfo.rank && (<>
-                          <span>#{artistInfo.rank} место в мире</span>
+                          <span>#{artistInfo.rank} место</span>
                           <span>•</span>
                         </>)}
                       <span>{artistInfo.followers.toLocaleString()} подписчиков</span>
                       {artistInfo.listeners && (<>
                           <span>•</span>
-                          <span>{artistInfo.listeners.toLocaleString()} слушателей за месяц</span>
+                          <span>{artistInfo.listeners.toLocaleString()} слушателей</span>
                         </>)}
                     </div>
                     <div className="flex items-center gap-2 text-sm flex-wrap text-white/90">
@@ -422,13 +423,13 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                 {artistInfo.biography && (<p className="text-sm text-muted-foreground line-clamp-4">{artistInfo.biography}</p>)}
                 <div className="flex items-center gap-2 text-sm flex-wrap">
                   {artistInfo.rank && (<>
-                      <span>#{artistInfo.rank} место в мире</span>
+                      <span>#{artistInfo.rank} место</span>
                       <span>•</span>
                     </>)}
                   <span>{artistInfo.followers.toLocaleString()} подписчиков</span>
                   {artistInfo.listeners && (<>
                       <span>•</span>
-                      <span>{artistInfo.listeners.toLocaleString()} слушателей за месяц</span>
+                      <span>{artistInfo.listeners.toLocaleString()} слушателей</span>
                     </>)}
                 </div>
                 <div className="flex items-center gap-2 text-sm flex-wrap">
@@ -541,14 +542,14 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     <span>{album.release_date?.split("-")[0]}</span>
                     {album.total_tracks && (<>
                             <span>•</span>
-                            <span>{album.total_tracks} трек(ов)</span>
+                            <span>{album.total_tracks} треков</span>
                         </>)}
                 </div>
               </div>);
             })}
           </div>
           {filteredAlbums.length === 0 && (<div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-              Не найдено релизов для выбранного фильтра дискографии.
+              No releases found for the selected discography filter.
             </div>)}
         </div>)}
 
@@ -560,12 +561,12 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                   <DialogTrigger asChild>
                       <Button variant="outline" size="sm">
                           <Filter className="h-4 w-4"/>
-                          Фильтрация альбомов
+                          Фильтр альбомов
                       </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[500px] h-[80vh] flex flex-col">
+                  <DialogContent className="sm:max-w-125 h-[80vh] flex flex-col">
                       <DialogHeader>
-                          <DialogTitle>Выбрать альбомы</DialogTitle>
+                          <DialogTitle>Выберите альбомы</DialogTitle>
                       </DialogHeader>
                       <ScrollArea className="flex-1 pr-4">
                           <div className="space-y-4">
@@ -583,9 +584,9 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                                                       {data.type}
                                                   </span>
                                                   <span>•</span>
-                                                  <span>{data.count} трек(ов)</span>
+                                                  <span>{data.count} треков</span>
                                                   <span>•</span>
-                                                  <span>{data.tracks[0]?.release_date?.split('-')[0] || 'Неизвестный год'}</span>
+                                                  <span>{data.tracks[0]?.release_date?.split('-')[0] || 'Unknown Year'}</span>
                                               </div>
                                           </div>
                                       </div>);
@@ -609,7 +610,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Скачать все тексты</p>
+                    <p>Download All Lyrics</p>
                   </TooltipContent>
                 </Tooltip>)}
               {onDownloadAllCovers && (<Tooltip>
@@ -619,7 +620,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Скачать все отдельные обложки</p>
+                    <p>Download All Separate Covers</p>
                   </TooltipContent>
                 </Tooltip>)}
               {downloadedTracks.size > 0 && (<Tooltip>
@@ -629,12 +630,12 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Открыть папку</p>
+                    <p>Open Folder</p>
                   </TooltipContent>
                 </Tooltip>)}
             </div>
           </div>
-          {isDownloading && (<DownloadProgress progress={downloadProgress} currentTrack={currentDownloadInfo} onStop={onStopDownload}/>)}
+          {isDownloading && (<DownloadProgress progress={downloadProgress} remainingCount={downloadRemainingCount} currentTrack={currentDownloadInfo} onStop={onStopDownload}/>)}
           <SearchAndSort searchQuery={searchQuery} sortBy={sortBy} onSearchChange={onSearchChange} onSortChange={onSortChange}/>
           <TrackList tracks={trackList} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={downloadedTracks} failedTracks={failedTracks} skippedTracks={skippedTracks} downloadingTrack={downloadingTrack} isDownloading={isDownloading} currentPage={currentPage} itemsPerPage={itemsPerPage} showCheckboxes={true} hideAlbumColumn={false} folderName={artistInfo.name} isArtistDiscography={true} downloadedLyrics={downloadedLyrics} failedLyrics={failedLyrics} skippedLyrics={skippedLyrics} downloadingLyricsTrack={downloadingLyricsTrack} checkingAvailabilityTrack={checkingAvailabilityTrack} availabilityMap={availabilityMap} onToggleTrack={onToggleTrack} onToggleSelectAll={onToggleSelectAll} onDownloadTrack={onDownloadTrack} onDownloadLyrics={onDownloadLyrics} onDownloadCover={onDownloadCover} downloadedCovers={downloadedCovers} failedCovers={failedCovers} skippedCovers={skippedCovers} downloadingCoverTrack={downloadingCoverTrack} onCheckAvailability={onCheckAvailability} onPageChange={onPageChange} onAlbumClick={onAlbumClick} onArtistClick={onArtistClick} onTrackClick={onTrackClick}/>
         </div>)}
